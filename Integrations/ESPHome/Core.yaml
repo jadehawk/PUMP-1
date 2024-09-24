@@ -1,5 +1,5 @@
 substitutions:
-  name: apollo-plt-1 # TODO: Rename
+  name: apollo-pump-1
   version: "24.8.7.2"
   device_description: ${name} made by Apollo Automation - version ${version}.
 
@@ -9,6 +9,13 @@ esp32:
     type: esp-idf
 
 api:
+  services:
+    - service: play_buzzer
+      variables:
+        song_str: string
+      then:
+        - rtttl.play:
+            rtttl: !lambda 'return song_str;'
 
 globals:
   - id: cycleCounter
@@ -24,3 +31,138 @@ captive_portal:
 
 web_server:
   port: 80
+
+# Buzzer
+output:
+  - platform: ledc
+    pin: GPIO10
+    id: buzzer
+rtttl:
+ output: buzzer
+
+switch:
+  - platform: factory_reset
+    id: factory_reset_switch
+    internal: true
+  - platform: gpio
+    pin: GPIO7
+    name: "Pump Control"
+    id: pump_control
+
+binary_sensor:
+  - platform: status
+    name: Online
+    id: ink_ha_connected
+  - platform: gpio
+    pin: 
+      number: GPIO9
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    id: reset_button
+    on_press:
+      then:
+        - lambda: |-
+            id(button_press_timestamp) = millis();    
+    on_release:
+      then:
+        - lambda: |-
+            if (millis() - id(button_press_timestamp) >= 10000) {
+              // Remove Wifi
+              id(factory_reset_switch).turn_on();
+            }
+            else {
+              // StatusCheck
+              id(statusCheck).execute();
+            }
+  - platform: gpio
+    name: Water level exists
+    id: water_level_exists
+    icon: mdi:water
+    pin: 
+      number: GPIO4
+      mode:
+        input: true
+        pulldown: True
+    filters:
+      - invert:
+  
+
+
+sensor:
+  - platform: internal_temperature
+    name: "ESP Temperature"
+    id: sys_esp_temperature
+
+  - platform: uptime
+    name: Uptime
+    id: sys_uptime
+    update_interval: 60s
+
+  - platform: wifi_signal
+    name: RSSI
+    id: wifi_signal_db
+    update_interval: 60s
+    entity_category: "diagnostic"
+
+light:
+  - platform: esp32_rmt_led_strip
+    id: rgb_light
+    name: "RGB Light"
+    pin: GPIO3
+    rmt_channel: 0
+    default_transition_length: 0s
+    chipset: WS2812
+    num_leds: 1
+    rgb_order: grb
+    effects:
+      - pulse:
+          name: "Slow Pulse"
+          transition_length: 1000ms
+          update_interval: 1000ms
+          min_brightness: 0%
+          max_brightness: 100%
+      - pulse:
+          name: "Fast Pulse"
+          transition_length: 100ms
+          update_interval: 100ms
+          min_brightness: 50%
+          max_brightness: 100%
+
+script:
+  - id: statusCheck
+    then:
+      - if:
+          condition:
+            - lambda: 'return id(ink_ha_connected).state;'
+          then:
+            - logger.log: "Apollo Automation: Connected To HA"
+            - light.turn_on: 
+                id: rgb_light
+                brightness: 100%
+                red: 0%
+                green: 0%
+                blue: 100%
+          else:
+            - if:
+                condition:
+                  - wifi.connected
+                then:
+                  - logger.log: "Apollo Automation: Connected To Wifi"
+                  - light.turn_on: 
+                      id: rgb_light
+                      brightness: 100%
+                      red: 0%
+                      green: 100%
+                      blue: 0%
+                else:
+                  - logger.log: "Apollo Automation: Not Connected To Wifi"
+                  - light.turn_on: 
+                      id: rgb_light
+                      brightness: 100%
+                      red: 100%
+                      green: 100%
+                      blue: 0%
+      - delay: 5s
+      - light.turn_off: rgb_light

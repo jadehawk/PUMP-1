@@ -9,9 +9,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        file: # TODO: Rename
-          - Integrations/ESPHome/PLT-1.yaml
-          - Integrations/ESPHome/PLT-1_BLE.yaml
+        file:
+          - Integrations/ESPHome/PUMP-1.yaml
+          - Integrations/ESPHome/PUMP-1_BLE.yaml
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4.1.7
