@@ -1,10 +1,12 @@
 substitutions:
   name: apollo-pump-1
-  version: "24.8.7.2"
+  version: "25.6.1.1"
   device_description: ${name} made by Apollo Automation - version ${version}.
 
 esp32:
-  board: esp32-c3-devkitm-1
+  board: esp32-c6-devkitm-1
+  variant: esp32c6
+  flash_size: 8MB
   framework:
     type: esp-idf
 
@@ -40,6 +42,16 @@ output:
 rtttl:
  output: buzzer
 
+button:
+  - platform: restart
+    icon: mdi:power-cycle
+    name: "ESP Reboot"
+
+  - platform: factory_reset
+    disabled_by_default: True
+    name: "Factory Reset ESP"
+    id: factory_reset_all
+
 switch:
   - platform: factory_reset
     id: factory_reset_switch
@@ -54,13 +66,13 @@ binary_sensor:
     name: Online
     id: ink_ha_connected
   - platform: gpio
+    id: reset_button
     pin: 
       number: GPIO9
       inverted: true
       mode:
         input: true
         pullup: true
-    id: reset_button
     on_press:
       then:
         - lambda: |-
@@ -87,7 +99,6 @@ binary_sensor:
         pulldown: True
     filters:
       - invert:
-  
 
 
 sensor:
