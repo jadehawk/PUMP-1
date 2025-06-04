@@ -1,6 +1,6 @@
 substitutions:
   name: apollo-pump-1
-  version: "25.6.1.1"
+  version: "25.6.4.1"
   device_description: ${name} made by Apollo Automation - version ${version}.
 
 esp32:
@@ -9,6 +9,22 @@ esp32:
   flash_size: 8MB
   framework:
     type: esp-idf
+
+esphome:
+  on_boot:
+    - priority: 600
+      then:
+        # Initialize the light as OFF to ensure clean state
+        - lambda: |-
+            id(light_initialized) = false;
+            id(pump_start_time) = 0;
+            id(safety_alert_active) = false;
+    # Add late boot phase to ensure components are initialized
+    - priority: -100
+      then:
+        - delay: 1000ms  # Give RMT peripheral and light component more time to initialize
+        - lambda: 'id(light_initialized) = true;'
+        - script.execute: statusCheck
 
 api:
   services:
@@ -40,6 +56,10 @@ globals:
     type: uint32_t
     initial_value: '0'
   - id: safety_alert_active
+    restore_value: no
+    type: bool
+    initial_value: 'false'
+  - id: light_initialized
     restore_value: no
     type: bool
     initial_value: 'false'
@@ -84,18 +104,21 @@ switch:
   - platform: template
     name: "Water Protection Override"
     id: water_protection_override
+    entity_category: config
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
     icon: mdi:shield-off
   - platform: template
     name: "Pump Safety Override"
     id: pump_safety_override
+    entity_category: config
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
     icon: mdi:shield-alert-outline
   - platform: template
     name: "Hourly Water Check"
     id: hourly_water_check_enabled
+    entity_category: config
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
     icon: mdi:water-check
@@ -110,6 +133,8 @@ switch:
     pin: GPIO7
     name: "Pump Control"
     id: pump_control
+    entity_category: config
+    disabled_by_default: true
     on_turn_on:
       then:
         - if:
@@ -131,9 +156,9 @@ switch:
                   id(safety_alert_active) = false;
               - script.execute: pump_safety_check
             else:
-              - logger.log: "Pump blocked - conditions not met"
-              - switch.turn_off: pump_control
+              - logger.log: "Pump blocked - water conditions not met"
               - rtttl.play: 'error:d=4,o=5,b=200:a,p,a,p,a'
+              - switch.turn_off: pump_control
     on_turn_off:
       then:
         - lambda: |-
@@ -141,7 +166,11 @@ switch:
             id(safety_alert_active) = false;
         - logger.log: "Pump turned off"
         - script.stop: pump_safety_check
-        - light.turn_off: rgb_light
+        - if:
+            condition:
+              - lambda: 'return id(light_initialized);'
+            then:
+              - light.turn_off: rgb_light
 
 binary_sensor:
   - platform: status
@@ -174,19 +203,18 @@ binary_sensor:
     name: Water Exists
     id: water_level_exists
     icon: mdi:water
-    pin: 
+    pin:
       number: GPIO4
       mode:
         input: true
-        pulldown: True
-    filters:
-      - invert:
+        pullup: true
 
 
 number:
   - platform: template
     name: "Pump Run Seconds"
     id: pump_run_seconds
+    entity_category: config
     icon: mdi:timer
     optimistic: true
     min_value: 1
@@ -198,6 +226,7 @@ number:
   - platform: template
     name: "Max Safe Run Time"
     id: max_safe_run_time
+    entity_category: config
     icon: mdi:timer-alert
     optimistic: true
     min_value: 30
@@ -233,6 +262,10 @@ light:
     chipset: WS2812
     num_leds: 1
     rgb_order: grb
+    # Add explicit power supply limit to prevent current spikes
+    max_refresh_rate: 20ms
+    on_turn_on:
+      - lambda: 'id(light_initialized) = true;'
     effects:
       - pulse:
           name: "Slow Pulse"
@@ -332,10 +365,13 @@ script:
       - if:
           condition:
             - switch.is_on: hourly_water_check_enabled
-            - binary_sensor.is_off: water_level_exists
           then:
-            - logger.log: "Water level check: No water detected - chirping buzzer"
-            - rtttl.play: 'chirp:d=16,o=6,b=200:c,p,c,p,c'
+            - if:
+                condition:
+                  - binary_sensor.is_off: water_level_exists
+                then:
+                  - logger.log: "Water level check: No water detected - chirping buzzer"
+                  - rtttl.play: 'chirp:d=16,o=6,b=200:c,p,c,p,c'
 
 interval:
   - interval: 1h
