@@ -1,15 +1,15 @@
 substitutions:
   name: apollo-pump-1
-  version: "25.6.4.1"
+  version: "25.7.3.1"
   device_description: ${name} made by Apollo Automation - version ${version}.
 
 esp32:
   board: esp32-c6-devkitm-1
   variant: esp32c6
-  flash_size: 8MB
+  flash_size: 4MB
   framework:
     type: esp-idf
-
+    
 esphome:
   on_boot:
     - priority: 600
@@ -72,7 +72,7 @@ web_server:
 # Buzzer
 output:
   - platform: ledc
-    pin: GPIO10
+    pin: GPIO5
     id: buzzer
 rtttl:
  output: buzzer
@@ -123,8 +123,8 @@ switch:
     restore_mode: RESTORE_DEFAULT_ON
     icon: mdi:water-check
   - platform: template
-    name: "Invert Water Logic"
-    id: invert_water_logic
+    name: "Stop Pump When Full"
+    id: stop_pump_when_full
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
     icon: mdi:water-sync
@@ -140,14 +140,7 @@ switch:
         - if:
             condition:
               or:
-                - and:
-                    # Normal mode: water exists and not inverted
-                    - switch.is_off: invert_water_logic
-                    - binary_sensor.is_on: water_level_exists
-                - and:
-                    # Inverted mode: water does not exist and inverted
-                    - switch.is_on: invert_water_logic
-                    - binary_sensor.is_off: water_level_exists
+                - binary_sensor.is_on: water_level_exists
                 - switch.is_on: water_protection_override
             then:
               - logger.log: "Pump turning on - conditions met"
@@ -208,6 +201,18 @@ binary_sensor:
       mode:
         input: true
         pullup: true
+      inverted: true
+
+  - platform: gpio
+    name: Full Sensor
+    id: full_sensor
+    icon: mdi:water
+    pin:
+      number: GPIO14
+      mode:
+        input: true
+        pullup: true
+      inverted: true
 
 
 number:
@@ -223,18 +228,21 @@ number:
     initial_value: 10
     unit_of_measurement: "s"
     restore_value: true
+    mode: box
+
   - platform: template
     name: "Max Safe Run Time"
     id: max_safe_run_time
     entity_category: config
     icon: mdi:timer-alert
     optimistic: true
-    min_value: 30
+    min_value: 5
     max_value: 600
     step: 10
     initial_value: 120
     unit_of_measurement: "s"
     restore_value: true
+    mode: box
 
 sensor:
   - platform: internal_temperature
@@ -332,11 +340,11 @@ script:
             - if:
                 condition:
                   - and:
-                      - switch.is_on: invert_water_logic
-                      - binary_sensor.is_on: water_level_exists
+                      - switch.is_on: stop_pump_when_full
+                      - binary_sensor.is_on: full_sensor
                       - switch.is_off: water_protection_override
                 then:
-                  - logger.log: "Pump stopping - water detected in inverted mode (tank full)"
+                  - logger.log: "Pump stopping - tank full"
                   - switch.turn_off: pump_control
                   - rtttl.play: 'complete:d=4,o=5,b=160:c,e,g,c6'
             - if:
@@ -351,6 +359,7 @@ script:
                         - lambda: 'return !id(safety_alert_active);'
                       then:
                         - lambda: 'id(safety_alert_active) = true;'
+                        - switch.turn_off: pump_control
                         - rtttl.play: 'alert:d=4,o=5,b=140:c,p,c,p,c,p,g,p,g,p,g'
                         - light.turn_on:
                             id: rgb_light

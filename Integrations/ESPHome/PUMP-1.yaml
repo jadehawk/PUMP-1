@@ -16,10 +16,10 @@ dashboard_import:
   package_import_url: github://ApolloAutomation/PUMP-1/Integrations/ESPHome/PUMP-1.yaml
   import_full_config: false
 
-improv_serial:
+#improv_serial:
 
-esp32_improv:
-  authorizer: none
+#esp32_improv:
+#  authorizer: none
 
 ota:
   - platform: esphome
@@ -39,11 +39,11 @@ update:
     source: https://apolloautomation.github.io/PUMP-1/firmware/manifest.json
 
 wifi:
-  on_connect:
-    - delay: 5s
-    - ble.disable:
-  on_disconnect:
-    - ble.enable:
+  #on_connect:
+    #- delay: 5s
+    #- ble.disable:
+  #on_disconnect:
+    #- ble.enable:
   ap:
     ssid: "Apollo PUMP1 Hotspot"
 
