@@ -101,30 +101,24 @@ switch:
   - platform: factory_reset
     id: factory_reset_switch
     internal: true
-  - platform: template
-    name: "Water Protection Override"
-    id: water_protection_override
-    entity_category: config
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF
     icon: mdi:shield-off
-  - platform: template
-    name: "Pump Safety Override"
-    id: pump_safety_override
-    entity_category: config
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF
-    icon: mdi:shield-alert-outline
   - platform: template
     name: "Hourly Water Check"
     id: hourly_water_check_enabled
     entity_category: config
     optimistic: true
-    restore_mode: RESTORE_DEFAULT_ON
+    restore_mode: RESTORE_DEFAULT_OFF
     icon: mdi:water-check
   - platform: template
-    name: "Stop Pump When Full"
+    name: "Stop Pump When Output Wet"
     id: stop_pump_when_full
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    icon: mdi:water-sync
+    entity_category: config
+  - platform: template
+    name: "Stop Pump When Input Dry"
+    id: stop_pump_when_dry
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
     icon: mdi:water-sync
@@ -140,8 +134,8 @@ switch:
         - if:
             condition:
               or:
-                - binary_sensor.is_on: water_level_exists
-                - switch.is_on: water_protection_override
+                - binary_sensor.is_on: fluid_input_sensor
+                - switch.is_off: stop_pump_when_dry
             then:
               - logger.log: "Pump turning on - conditions met"
               - lambda: |-
@@ -193,9 +187,10 @@ binary_sensor:
               id(run_pump_timed).execute();
             }
   - platform: gpio
-    name: Water Exists
-    id: water_level_exists
+    name: Fluid Input
+    id: fluid_input_sensor
     icon: mdi:water
+    device_class: moisture
     pin:
       number: GPIO4
       mode:
@@ -204,9 +199,10 @@ binary_sensor:
       inverted: true
 
   - platform: gpio
-    name: Full Sensor
-    id: full_sensor
+    name: Fluid Output
+    id: fulid_output_sensor
     icon: mdi:water
+    device_class: moisture
     pin:
       number: GPIO14
       mode:
@@ -219,27 +215,12 @@ number:
   - platform: template
     name: "Pump Run Seconds"
     id: pump_run_seconds
-    entity_category: config
     icon: mdi:timer
     optimistic: true
     min_value: 1
-    max_value: 300
+    max_value: 120
     step: 1
     initial_value: 10
-    unit_of_measurement: "s"
-    restore_value: true
-    mode: box
-
-  - platform: template
-    name: "Max Safe Run Time"
-    id: max_safe_run_time
-    entity_category: config
-    icon: mdi:timer-alert
-    optimistic: true
-    min_value: 5
-    max_value: 600
-    step: 10
-    initial_value: 120
     unit_of_measurement: "s"
     restore_value: true
     mode: box
@@ -289,6 +270,11 @@ light:
           max_brightness: 100%
 
 script:
+  - id: pumpUntilFull
+    then:
+
+
+      
   - id: statusCheck
     then:
       - if:
@@ -336,39 +322,24 @@ script:
           condition:
             - switch.is_on: pump_control
           then:
-            # Check if we should stop due to inverted logic (water reached sensor)
             - if:
                 condition:
                   - and:
                       - switch.is_on: stop_pump_when_full
-                      - binary_sensor.is_on: full_sensor
-                      - switch.is_off: water_protection_override
+                      - binary_sensor.is_on: fulid_output_sensor
                 then:
                   - logger.log: "Pump stopping - tank full"
                   - switch.turn_off: pump_control
                   - rtttl.play: 'complete:d=4,o=5,b=160:c,e,g,c6'
             - if:
                 condition:
-                  - lambda: |-
-                      if (id(pump_start_time) == 0) return false;
-                      uint32_t runtime = (millis() - id(pump_start_time)) / 1000;
-                      return runtime > id(max_safe_run_time).state && !id(pump_safety_override).state;
+                  - and:
+                      - switch.is_on: stop_pump_when_dry
+                      - binary_sensor.is_on: fluid_input_sensor
                 then:
-                  - if:
-                      condition:
-                        - lambda: 'return !id(safety_alert_active);'
-                      then:
-                        - lambda: 'id(safety_alert_active) = true;'
-                        - switch.turn_off: pump_control
-                        - rtttl.play: 'alert:d=4,o=5,b=140:c,p,c,p,c,p,g,p,g,p,g'
-                        - light.turn_on:
-                            id: rgb_light
-                            brightness: 100%
-                            red: 100%
-                            green: 0%
-                            blue: 0%
-                            effect: "Fast Pulse"
-            - delay: 5s
+                  - logger.log: "Pump stopping - input dry"
+                  - switch.turn_off: pump_control
+            - delay: 1s
   - id: water_level_check
     then:
       - if:
@@ -377,7 +348,7 @@ script:
           then:
             - if:
                 condition:
-                  - binary_sensor.is_off: water_level_exists
+                  - binary_sensor.is_off: fluid_input_sensor
                 then:
                   - logger.log: "Water level check: No water detected - chirping buzzer"
                   - rtttl.play: 'chirp:d=16,o=6,b=200:c,p,c,p,c'
