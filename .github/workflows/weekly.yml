@@ -6,12 +6,13 @@ on:
 
 jobs:
   build:
-    name: Building ${{ matrix.file }}
+    name: Building ${{ matrix.file }} / ESPHome ${{ matrix.esphome-version }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
         file:
           - Integrations/ESPHome/PUMP-1.yaml
+          - Integrations/ESPHome/PUMP-1_Minimal.yaml
         esphome-version:
           - stable
           - beta

@@ -1,6 +1,6 @@
 substitutions:
   name: apollo-pump-1
-  version: "25.6.4.1"
+  version: "25.7.10.1"
   device_description: ${name} made by Apollo Automation - version ${version}.
 
 esp32:
@@ -9,22 +9,26 @@ esp32:
   flash_size: 8MB
   framework:
     type: esp-idf
-
+    
 esphome:
   on_boot:
     - priority: 600
       then:
-        # Initialize the light as OFF to ensure clean state
         - lambda: |-
-            id(light_initialized) = false;
             id(pump_start_time) = 0;
             id(safety_alert_active) = false;
-    # Add late boot phase to ensure components are initialized
+        - script.execute: pump_safety_check
     - priority: -100
       then:
-        - delay: 1000ms  # Give RMT peripheral and light component more time to initialize
-        - lambda: 'id(light_initialized) = true;'
+        - delay: 1000ms 
         - script.execute: statusCheck
+    - priority: -10
+      then:
+        - if:
+            condition:
+              - lambda: "return id(runTest);"
+            then:
+              - lambda: "id(testScript).execute();"
 
 api:
   services:
@@ -41,12 +45,11 @@ api:
         - switch.turn_on: pump_control
         - delay: !lambda 'return seconds * 1000;'
         - switch.turn_off: pump_control
+    - service: run_pump_until_full
+      then: 
+        - script.execute: pumpUntilFull
 
 globals:
-  - id: cycleCounter
-    type: int
-    restore_value: no
-    initial_value: '0'
   - id: button_press_timestamp
     restore_value: no
     type: uint32_t
@@ -59,10 +62,12 @@ globals:
     restore_value: no
     type: bool
     initial_value: 'false'
-  - id: light_initialized
-    restore_value: no
+  - id: runTest
+    restore_value: yes
     type: bool
-    initial_value: 'false'
+    initial_value: "true"
+  - id: testCycleCount
+    type: int
 
 captive_portal:
 
@@ -72,7 +77,7 @@ web_server:
 # Buzzer
 output:
   - platform: ledc
-    pin: GPIO10
+    pin: GPIO5
     id: buzzer
 rtttl:
  output: buzzer
@@ -96,18 +101,43 @@ button:
         - switch.turn_on: pump_control
         - delay: !lambda 'return (int)id(pump_run_seconds).state * 1000;'
         - switch.turn_off: pump_control
+      
+  - platform: template
+    name: "Run Pump Until Output Wet"
+    id: run_pump_until_out_wet
+    icon: mdi:pump
+    disabled_by_default: true
+    on_press: 
+      then:
+        script.execute: pumpUntilFull
+
 
 switch:
   - platform: factory_reset
     id: factory_reset_switch
     internal: true
+    icon: mdi:shield-off
   - platform: template
-    name: "Water Protection Override"
-    id: water_protection_override
+    name: "Hourly Water Check"
+    id: hourly_water_check_enabled
     entity_category: config
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
-    icon: mdi:shield-off
+    icon: mdi:water-check
+  - platform: template
+    name: "Stop Pump When Output Wet"
+    id: stop_pump_when_full
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    icon: mdi:water-sync
+    entity_category: config
+  - platform: template
+    name: "Stop Pump When Input Dry"
+    id: stop_pump_when_dry
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    icon: mdi:water-sync
+    entity_category: config
   - platform: template
     name: "Pump Safety Override"
     id: pump_safety_override
@@ -115,20 +145,8 @@ switch:
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
     icon: mdi:shield-alert-outline
-  - platform: template
-    name: "Hourly Water Check"
-    id: hourly_water_check_enabled
-    entity_category: config
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_ON
-    icon: mdi:water-check
-  - platform: template
-    name: "Invert Water Logic"
-    id: invert_water_logic
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF
-    icon: mdi:water-sync
-    entity_category: config
+    disabled_by_default: true
+
   - platform: gpio
     pin: GPIO7
     name: "Pump Control"
@@ -140,21 +158,13 @@ switch:
         - if:
             condition:
               or:
-                - and:
-                    # Normal mode: water exists and not inverted
-                    - switch.is_off: invert_water_logic
-                    - binary_sensor.is_on: water_level_exists
-                - and:
-                    # Inverted mode: water does not exist and inverted
-                    - switch.is_on: invert_water_logic
-                    - binary_sensor.is_off: water_level_exists
-                - switch.is_on: water_protection_override
+                - binary_sensor.is_on: fluid_input_sensor
+                - switch.is_off: stop_pump_when_dry
             then:
               - logger.log: "Pump turning on - conditions met"
               - lambda: |-
                   id(pump_start_time) = millis();
                   id(safety_alert_active) = false;
-              - script.execute: pump_safety_check
             else:
               - logger.log: "Pump blocked - water conditions not met"
               - rtttl.play: 'error:d=4,o=5,b=200:a,p,a,p,a'
@@ -165,12 +175,6 @@ switch:
             id(pump_start_time) = 0;
             id(safety_alert_active) = false;
         - logger.log: "Pump turned off"
-        - script.stop: pump_safety_check
-        - if:
-            condition:
-              - lambda: 'return id(light_initialized);'
-            then:
-              - light.turn_off: rgb_light
 
 binary_sensor:
   - platform: status
@@ -193,48 +197,72 @@ binary_sensor:
         - lambda: |-
             if (millis() - id(button_press_timestamp) >= 10000) {
               // Remove Wifi
+              id(testCycleCount) = 0;
+              id(runTest) = true;
               id(factory_reset_switch).turn_on();
             }
-            else {
-              // Run pump for set seconds (Task 1.8)
-              id(run_pump_timed).execute();
+            else if (millis() - id(button_press_timestamp) >= 3000) {
+              // StatusCheck
+              id(statusCheck).execute();
+              delay(3000);
+              id(testCycleCount) = 0;
+              id(runTest) = true;
+              id(testScript).execute();
             }
+            else {
+              id(run_pump_timed).execute();
+            }                          
+
   - platform: gpio
-    name: Water Exists
-    id: water_level_exists
+    name: Fluid Input
+    id: fluid_input_sensor
     icon: mdi:water
+    device_class: moisture
     pin:
       number: GPIO4
       mode:
         input: true
         pullup: true
+      inverted: true
 
+  - platform: gpio
+    name: Fluid Output
+    id: fulid_output_sensor
+    icon: mdi:water
+    device_class: moisture
+    pin:
+      number: GPIO14
+      mode:
+        input: true
+        pullup: true
+      inverted: true
 
 number:
   - platform: template
     name: "Pump Run Seconds"
     id: pump_run_seconds
-    entity_category: config
     icon: mdi:timer
     optimistic: true
     min_value: 1
-    max_value: 300
+    max_value: 120
     step: 1
     initial_value: 10
     unit_of_measurement: "s"
     restore_value: true
+    mode: box
   - platform: template
     name: "Max Safe Run Time"
     id: max_safe_run_time
     entity_category: config
     icon: mdi:timer-alert
     optimistic: true
-    min_value: 30
+    min_value: 5
     max_value: 600
     step: 10
-    initial_value: 120
+    initial_value: 180
     unit_of_measurement: "s"
     restore_value: true
+    mode: box
 
 sensor:
   - platform: internal_temperature
@@ -264,8 +292,6 @@ light:
     rgb_order: grb
     # Add explicit power supply limit to prevent current spikes
     max_refresh_rate: 20ms
-    on_turn_on:
-      - lambda: 'id(light_initialized) = true;'
     effects:
       - pulse:
           name: "Slow Pulse"
@@ -281,6 +307,12 @@ light:
           max_brightness: 100%
 
 script:
+  - id: pumpUntilFull
+    then:
+      - switch.turn_on: stop_pump_when_full
+      - delay: 100ms  # Small delay to ensure switch state is updated
+      - switch.turn_on: pump_control
+      
   - id: statusCheck
     then:
       - if:
@@ -328,15 +360,13 @@ script:
           condition:
             - switch.is_on: pump_control
           then:
-            # Check if we should stop due to inverted logic (water reached sensor)
             - if:
                 condition:
                   - and:
-                      - switch.is_on: invert_water_logic
-                      - binary_sensor.is_on: water_level_exists
-                      - switch.is_off: water_protection_override
+                      - switch.is_on: stop_pump_when_full
+                      - binary_sensor.is_on: fulid_output_sensor
                 then:
-                  - logger.log: "Pump stopping - water detected in inverted mode (tank full)"
+                  - logger.log: "Pump stopping - tank full"
                   - switch.turn_off: pump_control
                   - rtttl.play: 'complete:d=4,o=5,b=160:c,e,g,c6'
             - if:
@@ -346,20 +376,17 @@ script:
                       uint32_t runtime = (millis() - id(pump_start_time)) / 1000;
                       return runtime > id(max_safe_run_time).state && !id(pump_safety_override).state;
                 then:
-                  - if:
-                      condition:
-                        - lambda: 'return !id(safety_alert_active);'
-                      then:
-                        - lambda: 'id(safety_alert_active) = true;'
-                        - rtttl.play: 'alert:d=4,o=5,b=140:c,p,c,p,c,p,g,p,g,p,g'
-                        - light.turn_on:
-                            id: rgb_light
-                            brightness: 100%
-                            red: 100%
-                            green: 0%
-                            blue: 0%
-                            effect: "Fast Pulse"
-            - delay: 5s
+                  - logger.log: "Pump stopping - safety"
+                  - switch.turn_off: pump_control
+            - if:
+                condition:
+                  - and:
+                      - switch.is_on: stop_pump_when_dry
+                      - binary_sensor.is_on: fluid_input_sensor
+                then:
+                  - logger.log: "Pump stopping - input dry"
+                  - switch.turn_off: pump_control
+            - delay: 1s
   - id: water_level_check
     then:
       - if:
@@ -368,10 +395,32 @@ script:
           then:
             - if:
                 condition:
-                  - binary_sensor.is_off: water_level_exists
+                  - binary_sensor.is_off: fluid_input_sensor
                 then:
                   - logger.log: "Water level check: No water detected - chirping buzzer"
                   - rtttl.play: 'chirp:d=16,o=6,b=200:c,p,c,p,c'
+  - id: testScript
+    then:
+      if: 
+        condition:
+          - lambda: "return id(runTest) == true;"
+        then:
+          - lambda: "id(runTest) = false;"
+          - lambda: "id(testCycleCount) = 0;"
+          - lambda: "id(runTest) = false;"
+          - light.turn_on:
+              id: rgb_light
+              red: 0%
+              green: 100%
+              blue: 0%
+          - delay: 5s
+          - light.turn_on:
+              id: rgb_light
+              red: 0%
+              green: 0%
+              blue: 0%
+          - light.turn_off:
+              id: rgb_light
 
 interval:
   - interval: 1h
