@@ -6,7 +6,7 @@ substitutions:
 esp32:
   board: esp32-c6-devkitm-1
   variant: esp32c6
-  flash_size: 4MB
+  flash_size: 8MB
   framework:
     type: esp-idf
     
@@ -199,7 +199,6 @@ binary_sensor:
               // Remove Wifi
               id(testCycleCount) = 0;
               id(runTest) = true;
-              id(prevent_sleep).turn_on();
               id(factory_reset_switch).turn_on();
             }
             else if (millis() - id(button_press_timestamp) >= 3000) {
