@@ -1,6 +1,6 @@
 substitutions:
   name: apollo-pump-1
-  version: "25.7.3.1"
+  version: "25.7.9.1"
   device_description: ${name} made by Apollo Automation - version ${version}.
 
 esp32:
@@ -14,16 +14,14 @@ esphome:
   on_boot:
     - priority: 600
       then:
-        # Initialize the light as OFF to ensure clean state
         - lambda: |-
-            id(light_initialized) = false;
             id(pump_start_time) = 0;
             id(safety_alert_active) = false;
+        - script.execute: pump_safety_check
     # Add late boot phase to ensure components are initialized
     - priority: -100
       then:
         - delay: 1000ms  # Give RMT peripheral and light component more time to initialize
-        - lambda: 'id(light_initialized) = true;'
         - script.execute: statusCheck
 
 api:
@@ -41,6 +39,9 @@ api:
         - switch.turn_on: pump_control
         - delay: !lambda 'return seconds * 1000;'
         - switch.turn_off: pump_control
+    - service: run_pump_until_full
+      then: 
+        - script.execute: pumpUntilFull
 
 globals:
   - id: cycleCounter
@@ -56,10 +57,6 @@ globals:
     type: uint32_t
     initial_value: '0'
   - id: safety_alert_active
-    restore_value: no
-    type: bool
-    initial_value: 'false'
-  - id: light_initialized
     restore_value: no
     type: bool
     initial_value: 'false'
@@ -96,6 +93,16 @@ button:
         - switch.turn_on: pump_control
         - delay: !lambda 'return (int)id(pump_run_seconds).state * 1000;'
         - switch.turn_off: pump_control
+      
+  - platform: template
+    name: "Run Pump Until Output Wet"
+    id: run_pump_until_out_wet
+    icon: mdi:pump
+    disabled_by_default: true
+    on_press: 
+      then:
+        script.execute: pumpUntilFull
+
 
 switch:
   - platform: factory_reset
@@ -123,6 +130,15 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     icon: mdi:water-sync
     entity_category: config
+  - platform: template
+    name: "Pump Safety Override"
+    id: pump_safety_override
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    icon: mdi:shield-alert-outline
+    disabled_by_default: true
+
   - platform: gpio
     pin: GPIO7
     name: "Pump Control"
@@ -141,7 +157,6 @@ switch:
               - lambda: |-
                   id(pump_start_time) = millis();
                   id(safety_alert_active) = false;
-              - script.execute: pump_safety_check
             else:
               - logger.log: "Pump blocked - water conditions not met"
               - rtttl.play: 'error:d=4,o=5,b=200:a,p,a,p,a'
@@ -152,12 +167,6 @@ switch:
             id(pump_start_time) = 0;
             id(safety_alert_active) = false;
         - logger.log: "Pump turned off"
-        - script.stop: pump_safety_check
-        - if:
-            condition:
-              - lambda: 'return id(light_initialized);'
-            then:
-              - light.turn_off: rgb_light
 
 binary_sensor:
   - platform: status
@@ -224,6 +233,19 @@ number:
     unit_of_measurement: "s"
     restore_value: true
     mode: box
+  - platform: template
+    name: "Max Safe Run Time"
+    id: max_safe_run_time
+    entity_category: config
+    icon: mdi:timer-alert
+    optimistic: true
+    min_value: 5
+    max_value: 600
+    step: 10
+    initial_value: 180
+    unit_of_measurement: "s"
+    restore_value: true
+    mode: box
 
 sensor:
   - platform: internal_temperature
@@ -253,8 +275,6 @@ light:
     rgb_order: grb
     # Add explicit power supply limit to prevent current spikes
     max_refresh_rate: 20ms
-    on_turn_on:
-      - lambda: 'id(light_initialized) = true;'
     effects:
       - pulse:
           name: "Slow Pulse"
@@ -272,8 +292,9 @@ light:
 script:
   - id: pumpUntilFull
     then:
-
-
+      - switch.turn_on: stop_pump_when_full
+      - delay: 100ms  # Small delay to ensure switch state is updated
+      - switch.turn_on: pump_control
       
   - id: statusCheck
     then:
@@ -331,6 +352,15 @@ script:
                   - logger.log: "Pump stopping - tank full"
                   - switch.turn_off: pump_control
                   - rtttl.play: 'complete:d=4,o=5,b=160:c,e,g,c6'
+            - if:
+                condition:
+                  - lambda: |-
+                      if (id(pump_start_time) == 0) return false;
+                      uint32_t runtime = (millis() - id(pump_start_time)) / 1000;
+                      return runtime > id(max_safe_run_time).state && !id(pump_safety_override).state;
+                then:
+                  - logger.log: "Pump stopping - safety"
+                  - switch.turn_off: pump_control
             - if:
                 condition:
                   - and:
