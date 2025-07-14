@@ -188,7 +188,7 @@ binary_sensor:
       - timings:
           - ON for at least 10s
         then:
-          - button.press: factory_reset_button
+          - button.press: factory_reset_all
       - timings:
           - ON for at least 3s
           - OFF for at least 0.2s
