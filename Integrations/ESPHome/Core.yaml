@@ -50,10 +50,6 @@ api:
         - script.execute: pumpUntilFull
 
 globals:
-  - id: button_press_timestamp
-    restore_value: no
-    type: uint32_t
-    initial_value: '0'
   - id: pump_start_time
     restore_value: no
     type: uint32_t
@@ -188,30 +184,29 @@ binary_sensor:
       mode:
         input: true
         pullup: true
-    on_press:
-      then:
-        - lambda: |-
-            id(button_press_timestamp) = millis();    
-    on_release:
-      then:
-        - lambda: |-
-            if (millis() - id(button_press_timestamp) >= 10000) {
-              // Remove Wifi
-              id(testCycleCount) = 0;
-              id(runTest) = true;
-              id(factory_reset_switch).turn_on();
-            }
-            else if (millis() - id(button_press_timestamp) >= 3000) {
-              // StatusCheck
-              id(statusCheck).execute();
-              delay(3000);
-              id(testCycleCount) = 0;
-              id(runTest) = true;
-              id(testScript).execute();
-            }
-            else {
-              id(run_pump_timed).execute();
-            }                          
+    on_multi_click:
+      - timings:
+          - ON for at least 10s
+        then:
+          - button.press: factory_reset_button
+      - timings:
+          - ON for at least 3s
+          - OFF for at least 0.2s
+        then:
+          - script.execute: statusCheck
+          - delay: 3s
+          - global.set:
+              id: testCycleCount
+              value: "0"
+          - global.set:
+              id: runTest
+              value: "true"
+          - script.execute: testScript
+      - timings:
+          - ON for at most 1s
+          - OFF for at least 0.2s
+        then:
+          - script.execute: run_pump_timed
 
   - platform: gpio
     name: Fluid Input
