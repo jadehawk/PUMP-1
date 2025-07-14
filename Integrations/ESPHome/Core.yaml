@@ -185,11 +185,11 @@ binary_sensor:
         input: true
         pullup: true
     on_multi_click:
-      - timings:
+      - timing:
           - ON for at least 10s
         then:
           - button.press: factory_reset_all
-      - timings:
+      - timing:
           - ON for at least 3s
           - OFF for at least 0.2s
         then:
@@ -202,7 +202,7 @@ binary_sensor:
               id: runTest
               value: "true"
           - script.execute: testScript
-      - timings:
+      - timing:
           - ON for at most 1s
           - OFF for at least 0.2s
         then:
