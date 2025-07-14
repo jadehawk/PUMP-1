@@ -195,10 +195,10 @@ binary_sensor:
         then:
           - script.execute: statusCheck
           - delay: 3s
-          - global.set:
+          - globals.set:
               id: testCycleCount
               value: "0"
-          - global.set:
+          - globals.set:
               id: runTest
               value: "true"
           - script.execute: testScript
