@@ -45,7 +45,7 @@ wifi:
   on_disconnect:
     - ble.enable:
   ap:
-    ssid: "Apollo PUMP-1 Hotspot"
+    ssid: "Apollo PUMP1 Hotspot"
 
 logger:
 

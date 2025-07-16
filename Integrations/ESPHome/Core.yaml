@@ -1,6 +1,6 @@
 substitutions:
   name: apollo-pump-1
-  version: "25.7.16.1"
+  version: "25.7.15"
   device_description: ${name} made by Apollo Automation - version ${version}.
 
 esp32:
@@ -259,7 +259,7 @@ number:
     min_value: 5
     max_value: 600
     step: 10
-    initial_value: 60
+    initial_value: 180
     unit_of_measurement: "s"
     restore_value: true
     mode: box
