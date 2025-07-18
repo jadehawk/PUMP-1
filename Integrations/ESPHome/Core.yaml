@@ -1,6 +1,6 @@
 substitutions:
   name: apollo-pump-1
-  version: "25.7.16.1"
+  version: "25.7.18.1"
   device_description: ${name} made by Apollo Automation - version ${version}.
 
 esp32:
@@ -117,13 +117,6 @@ switch:
     id: factory_reset_switch
     internal: true
     icon: mdi:shield-off
-  - platform: template
-    name: "Hourly Water Check"
-    id: hourly_water_check_enabled
-    entity_category: config
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF
-    icon: mdi:water-check
   - platform: template
     name: "Stop Pump When Output Wet"
     id: stop_pump_when_full
@@ -386,17 +379,6 @@ script:
                   - logger.log: "Pump stopping - input dry"
                   - switch.turn_off: pump_control
             - delay: 1s
-  - id: water_level_check
-    then:
-      - if:
-          condition:
-            - switch.is_on: hourly_water_check_enabled
-          then:
-            - if:
-                condition:
-                  - binary_sensor.is_off: fluid_input_sensor
-                then:
-                  - logger.log: "Water level check: No water detected - chirping buzzer"
   - id: testScript
     then:
       if: 
@@ -419,8 +401,3 @@ script:
               blue: 0%
           - light.turn_off:
               id: rgb_light
-
-interval:
-  - interval: 1h
-    then:
-      - script.execute: water_level_check
