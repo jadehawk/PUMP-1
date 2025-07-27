@@ -6,6 +6,15 @@ esphome:
   platformio_options:
     board_build.flash_mode: dio
 
+  on_boot:
+  - priority: -10
+    then:
+      - if:
+          condition:
+            - lambda: "return id(runTest);"
+          then:
+            - lambda: "id(testScript).execute();"
+
   project:
     name: "ApolloAutomation.PUMP-1"
     version: "${version}"
