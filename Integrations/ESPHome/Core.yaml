@@ -1,6 +1,6 @@
 substitutions:
   name: apollo-pump-1
-  version: "25.7.10.1"
+  version: "25.7.18.1"
   device_description: ${name} made by Apollo Automation - version ${version}.
 
 esp32:
@@ -114,13 +114,6 @@ switch:
     internal: true
     icon: mdi:shield-off
   - platform: template
-    name: "Hourly Water Check"
-    id: hourly_water_check_enabled
-    entity_category: config
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF
-    icon: mdi:water-check
-  - platform: template
     name: "Stop Pump When Output Wet"
     id: stop_pump_when_full
     optimistic: true
@@ -161,9 +154,9 @@ switch:
               - lambda: |-
                   id(pump_start_time) = millis();
                   id(safety_alert_active) = false;
+              - script.execute: pump_safety_check
             else:
               - logger.log: "Pump blocked - water conditions not met"
-              - rtttl.play: 'error:d=4,o=5,b=200:a,p,a,p,a'
               - switch.turn_off: pump_control
     on_turn_off:
       then:
@@ -254,7 +247,7 @@ number:
     min_value: 5
     max_value: 600
     step: 10
-    initial_value: 180
+    initial_value: 60
     unit_of_measurement: "s"
     restore_value: true
     mode: box
@@ -363,7 +356,6 @@ script:
                 then:
                   - logger.log: "Pump stopping - tank full"
                   - switch.turn_off: pump_control
-                  - rtttl.play: 'complete:d=4,o=5,b=160:c,e,g,c6'
             - if:
                 condition:
                   - lambda: |-
@@ -382,18 +374,6 @@ script:
                   - logger.log: "Pump stopping - input dry"
                   - switch.turn_off: pump_control
             - delay: 1s
-  - id: water_level_check
-    then:
-      - if:
-          condition:
-            - switch.is_on: hourly_water_check_enabled
-          then:
-            - if:
-                condition:
-                  - binary_sensor.is_off: fluid_input_sensor
-                then:
-                  - logger.log: "Water level check: No water detected - chirping buzzer"
-                  - rtttl.play: 'chirp:d=16,o=6,b=200:c,p,c,p,c'
   - id: testScript
     then:
       if: 
@@ -416,8 +396,3 @@ script:
               blue: 0%
           - light.turn_off:
               id: rgb_light
-
-interval:
-  - interval: 1h
-    then:
-      - script.execute: water_level_check
