@@ -26,7 +26,7 @@ jobs:
       device-name: pump-1
       yaml-files: |
         Integrations/ESPHome/PUMP-1.yaml
-      firmware-names: "PUMP-1:firmware"
+      firmware-names: "1:firmware"
       core-yaml-path: Integrations/ESPHome/Core.yaml
       esphome-version: stable
       # Bypass check if manually triggered with bypass option
